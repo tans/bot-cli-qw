@@ -1,0 +1,256 @@
+# cli.exe 本地 HTTP 对接（精简版）
+
+用于 `cli.exe` 与本地服务双向通讯（轮询 GET + 上报 POST）。
+
+## 基本信息
+- 地址：`http://127.0.0.1:6255`
+- 路径：`/message`
+- 仅监听本机 `127.0.0.1`
+
+## 消息结构
+`GET` / `POST` 都用统一结构：
+
+```json
+{ "type": 11029, "data": {} }
+```
+
+- `type`：必填（number | string）
+- `data`：任意 JSON；若为 JSON 字符串会尝试解析
+
+## GET /message（拉取指令）
+- 无消息：`200` + 空字符串 `""`（不是 JSON）
+- 有消息：`200` + JSON（含 `type` / `data`）
+- 非长轮询：客户端需自行轮询
+- 建议：空响应 sleep 50~200ms（或退避）
+
+## POST /message（上报事件 / 回传结果）
+- 头：`Content-Type: application/json`
+- 成功：`200` → `{ "success": true }`
+- 失败：`400` → `{ "success": false, "error": "..." }`
+- 服务端异常：`500` → `{ "success": false, "error": "Internal Server Error" }`
+
+## 常见 type（简表）
+- 发送：`SEND_TEXT(11029)`、`SEND_IMAGE(11030)`、`SEND_FILE(11031)`
+- 接收：`MSG_TEXT(11041)`、`MSG_IMAGE(11042)`
+- 登录/状态：`EVENT_LOGIN(11026)`、`LOGOUT(11112)`、`GET_QRCODE(11122)`
+- 联系人/群：`GET_EXTERNAL_CONTACT(11037)`、`GET_GROUPS(11038)`
+
+## 重要消息结构（示例）
+
+### CDN 下载（type: 11171）
+```json
+{
+  "type": 11171,
+  "data": {
+    "url": "https://imunion.weixin.qq.com/cgi-bin/mmae-bin/tpdownloadmedia?param=...",
+    "auth_key": "v1_...",
+    "aes_key": "9385a744af20cba0e59a52d51e3cacd1",
+    "size": 16504,
+    "save_path": "e:\\cdn\\3.jpg"
+  }
+}
+```
+
+### CDN 下载（type: 11170）
+```json
+{
+  "type": 11170,
+  "data": {
+    "aes_key": "61316639333163346262363730326261",
+    "file_id": "3052020102044b30490201000204283cabaa02030f4241020436c16eb4...",
+    "save_path": "e:\\cdn\\1.jpg",
+    "file_size": 968802,
+    "file_type": 1
+  }
+}
+```
+
+### 获取群会话列表（11038）
+请求：
+```json
+{ "type": 11038, "data": { "page_num": 1, "page_size": 10 } }
+```
+
+响应（示例）：
+```json
+{
+  "type": 11038,
+  "data": {
+    "page_num": 1,
+    "page_size": 10,
+    "total": 26,
+    "total_page": 3,
+    "room_list": [
+      { "conversation_id": "R:xxxx", "nickname": "测试大群1" }
+    ]
+  }
+}
+```
+
+### 获取好友（11037）
+请求：
+```json
+{ "type": 11037, "data": { "page_num": 1, "page_size": 10 } }
+```
+
+响应（示例）：
+```json
+{
+  "type": 11037,
+  "data": {
+    "page_num": 1,
+    "page_size": 10,
+    "total": 26,
+    "total_page": 3,
+    "user_list": [
+      { "conversation_id": "S:xxxx", "username": "小邪" }
+    ]
+  }
+}
+```
+
+### 接收文本消息（11041）
+示例：
+```json
+{
+  "type": 11041,
+  "data": {
+    "at_list": [],
+    "content": "hello world",
+    "content_type": 2,
+    "conversation_id": "S:1688850xx328682_78813xxx83912998",
+    "is_pc": 0,
+    "local_id": "2819",
+    "receiver": "1688850535xxx",
+    "send_time": "1639407098",
+    "sender": "78813022839xx",
+    "sender_name": "小邪",
+    "server_id": "1099017"
+  }
+}
+```
+
+字段要点：`content` 消息内容，`content_type` 消息类型，`conversation_id` 会话 id，`is_pc` 是否客户端发送，`local_id` 本地消息 id，`receiver` 接收者 id，`send_time` 发送时间，`sender` 发送者 id，`sender_name` 发送者姓名，`server_id` 服务器消息 id。
+
+### 接收图片消息（11042）
+示例：
+```json
+{
+  "type": 11042,
+  "data": {
+    "content_type": 101,
+    "conversation_id": "S:16888xx682_788130228391xxx8",
+    "is_pc": 0,
+    "local_id": "2820",
+    "receiver": "168885xx328682",
+    "send_time": "1639407252",
+    "sender": "788130xxx2998",
+    "sender_name": "小邪",
+    "server_id": "1099020",
+    "cdn_type": 1,
+    "cdn": {
+      "aes_key": "9c81aab279db832121a167dee95cadfe",
+      "auth_key": "v1_...",
+      "ld_size": 3113,
+      "ld_url": "https://imunion.weixin.qq.com/cgi-bin/mmae-bin/tpdownloadmedia?param=...",
+      "md5": "8884990c7174278280bc67037d1d3267",
+      "md_size": 3281,
+      "md_url": "https://imunion.weixin.qq.com/cgi-bin/mmae-bin/tpdownloadmedia?param=...",
+      "size": 18266,
+      "url": "https://imunion.weixin.qq.com/cgi-bin/mmae-bin/tpdownloadmedia?param=..."
+    }
+  }
+}
+```
+
+字段要点：`cdn_type`（1 wxCdn，2 c2cCdn，3 bigCdn），`cdn` 内含下载所需的 `url/auth_key/aes_key` 与尺寸信息。
+
+### 接收链接消息（11047）
+示例：
+```json
+{
+  "type": 11047,
+  "data": {
+    "content_type": 13,
+    "conversation_id": "S:168885xx8682_788130228xxx998",
+    "desc": "",
+    "image_url": "",
+    "is_pc": 0,
+    "local_id": "2821",
+    "receiver": "1688850xxx8682",
+    "send_time": "1639407580",
+    "sender": "7881302283xxxx2998",
+    "sender_name": "小邪",
+    "server_id": "1099023",
+    "title": "据说思乡有八百多种，你是哪一种？",
+    "url": "http://mp.weixin.qq.com/s?__biz=MTI0MDU3NDYwMQ==&mid=2657210171&idx=1&sn=ba8436a94914948d0ace62bc2d4fe101&chksm=7a5b32dd4d2cbbcbea2e14e0f067133ff0d74e7f87b5020e52cae84e06f8105f5c735879289f&scene=126&&sessionid=1639407574#rd",
+    "cdn_type": 0,
+    "cdn": {
+      "aes_key": "",
+      "auth_key": "",
+      "size": 0,
+      "url": "https://mmbiz.qpic.cn/mmbiz_jpg/oq1PymRl9D58P1dxgJCW4ysxCGYWgVzMfaONib0w41Xib5JQ1iaWOgJKWLmNic1xVwCl2msJQic0tsS8kqUhPe3ftIA/300?wxtype=jpeg&wxfrom=0"
+    }
+  }
+}
+```
+
+### 发送文本消息（11029）
+示例：
+```json
+{
+  "type": 11029,
+  "data": {
+    "conversation_id": "xxxxxxx",
+    "content": "你好，世界"
+  }
+}
+```
+
+### 发送艾特文本（11069）
+示例：
+```json
+{
+  "type": 11069,
+  "data": {
+    "conversation_id": "xxxxxxx",
+    "content": "你好，世界",
+    "at_list": ["168888xxxxxx", "1688xxxxxxxxx"]
+  }
+}
+```
+
+### 发送图片（11030）
+示例：
+```json
+{
+  "type": 11030,
+  "data": {
+    "conversation_id": "xxxxxxxx",
+    "file": "c:\\User\\ssx\\x\\x.jpg"
+  }
+}
+```
+
+### 发送文件（11031）
+示例：
+```json
+{
+  "type": 11031,
+  "data": {
+    "conversation_id": "xxxxxxxx",
+    "file": "c:\\User\\ssx\\x\\x.jpg"
+  }
+}
+```
+
+## curl 快速联调
+```bash
+curl -sS http://127.0.0.1:6255/message
+```
+
+```bash
+curl -sS -X POST http://127.0.0.1:6255/message \
+  -H 'Content-Type: application/json' \
+  -d '{"type":11041,"data":{"text":"hello"}}'
+```
